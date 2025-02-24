@@ -2,7 +2,7 @@
 pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
-import "./ExitFormat.sol";
+import "../src/ExitFormat.sol";
 
 contract TestConsumer is ERC1155Holder {
     receive() external payable {
