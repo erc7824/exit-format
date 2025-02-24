@@ -48,7 +48,12 @@ library ExitFormat {
     //          This requires the metadata to be an encoded `TokenIdExitMetadata`
     // Qualified - Assets that are fully qualified and pinned to a specific chain and assetHolder.
     //             This requires the metadata to be an encoded `QualifiedAssetMetaData`
-    enum AssetType {Default, ERC721, ERC1155, Qualified}
+    enum AssetType {
+        Default,
+        ERC721,
+        ERC1155,
+        Qualified
+    }
 
     // Metadata structure for ERC721 and ERC1155 exits
     struct TokenIdExitMetadata {
@@ -60,7 +65,11 @@ library ExitFormat {
     // (which would make a material difference to the final state in the case of running out of gas or funds)
     // Allocations = Allocation[]
 
-    enum AllocationType {simple, withdrawHelper, guarantee}
+    enum AllocationType {
+        simple,
+        withdrawHelper,
+        guarantee
+    }
 
     // An Allocation specifies
     // * a destination, referring either to an ethereum address or an application-specific identifier
@@ -93,42 +102,23 @@ library ExitFormat {
     }
 
     // We use underscore parentheses to denote an _encodedVariable_
-    function encodeExit(SingleAssetExit[] memory exit)
-        internal
-        pure
-        returns (bytes memory)
-    {
+    function encodeExit(SingleAssetExit[] memory exit) internal pure returns (bytes memory) {
         return abi.encode(exit);
     }
 
-    function decodeExit(bytes memory _exit_)
-        internal
-        pure
-        returns (SingleAssetExit[] memory)
-    {
+    function decodeExit(bytes memory _exit_) internal pure returns (SingleAssetExit[] memory) {
         return abi.decode(_exit_, (SingleAssetExit[]));
     }
 
-    function encodeAllocation(Allocation memory allocation)
-        internal
-        pure
-        returns (bytes memory)
-    {
+    function encodeAllocation(Allocation memory allocation) internal pure returns (bytes memory) {
         return abi.encode(allocation);
     }
 
-    function decodeAllocation(bytes memory _allocation_)
-        internal
-        pure
-        returns (Allocation memory)
-    {
+    function decodeAllocation(bytes memory _allocation_) internal pure returns (Allocation memory) {
         return abi.decode(_allocation_, (Allocation));
     }
 
-    function exitsEqual(
-        SingleAssetExit[] memory exitA,
-        SingleAssetExit[] memory exitB
-    ) internal pure returns (bool) {
+    function exitsEqual(SingleAssetExit[] memory exitA, SingleAssetExit[] memory exitB) internal pure returns (bool) {
         return _bytesEqual(encodeExit(exitA), encodeExit(exitB));
     }
 
@@ -148,9 +138,7 @@ library ExitFormat {
      * @dev Executes a single asset exit by paying out the asset and calling external contracts
      * @param singleAssetExit The single asset exit to be paid out.
      */
-    function executeSingleAssetExit(
-        ExitFormat.SingleAssetExit memory singleAssetExit
-    ) internal {
+    function executeSingleAssetExit(ExitFormat.SingleAssetExit memory singleAssetExit) internal {
         address asset = singleAssetExit.asset;
 
         if (_isForeignAsset(singleAssetExit)) {
@@ -158,21 +146,11 @@ library ExitFormat {
         }
 
         for (uint256 j = 0; j < singleAssetExit.allocations.length; j++) {
-            require(
-                _isAddress(singleAssetExit.allocations[j].destination),
-                "Destination is not a zero-padded address"
-            );
-            address payable destination =
-                payable(
-                    address(
-                        uint160(
-                            uint256(singleAssetExit.allocations[j].destination)
-                        )
-                    )
-                );
+            require(_isAddress(singleAssetExit.allocations[j].destination), "Destination is not a zero-padded address");
+            address payable destination = payable(address(uint160(uint256(singleAssetExit.allocations[j].destination))));
             uint256 amount = singleAssetExit.allocations[j].amount;
             if (asset == address(0)) {
-                (bool success, ) = destination.call{value: amount}(""); //solhint-disable-line avoid-low-level-calls
+                (bool success,) = destination.call{value: amount}(""); //solhint-disable-line avoid-low-level-calls
                 require(success, "Could not transfer ETH");
             } else {
                 if (
@@ -185,33 +163,13 @@ library ExitFormat {
                     singleAssetExit.assetMetadata.assetType == AssetType.ERC721
                 ) {
                     require(amount == 1, "Amount must be 1 for an ERC721 exit");
-                    uint256 tokenId =
-                        abi
-                            .decode(
-                            singleAssetExit
-                                .assetMetadata
-                                .metadata,
-                            (TokenIdExitMetadata)
-                        )
-                            .tokenId;
-                    IERC721(asset).safeTransferFrom(
-                        address(this),
-                        destination,
-                        tokenId
-                    );
+                    uint256 tokenId = abi.decode(singleAssetExit.assetMetadata.metadata, (TokenIdExitMetadata)).tokenId;
+                    IERC721(asset).safeTransferFrom(address(this), destination, tokenId);
                 } else if (
                     // ERC1155 Token
                     singleAssetExit.assetMetadata.assetType == AssetType.ERC1155
                 ) {
-                    uint256 tokenId =
-                        abi
-                            .decode(
-                            singleAssetExit
-                                .assetMetadata
-                                .metadata,
-                            (TokenIdExitMetadata)
-                        )
-                            .tokenId;
+                    uint256 tokenId = abi.decode(singleAssetExit.assetMetadata.metadata, (TokenIdExitMetadata)).tokenId;
                     IERC1155(asset).safeTransferFrom(
                         address(this),
                         destination,
@@ -223,14 +181,8 @@ library ExitFormat {
                     revert("unsupported asset");
                 }
             }
-            if (
-                singleAssetExit.allocations[j].allocationType ==
-                uint8(AllocationType.withdrawHelper)
-            ) {
-                WithdrawHelperMetaData memory wd =
-                    _parseWithdrawHelper(
-                        singleAssetExit.allocations[j].metadata
-                    );
+            if (singleAssetExit.allocations[j].allocationType == uint8(AllocationType.withdrawHelper)) {
+                WithdrawHelperMetaData memory wd = _parseWithdrawHelper(singleAssetExit.allocations[j].metadata);
                 WithdrawHelper(wd.callTo).execute(wd.callData, amount);
             }
         }
@@ -241,21 +193,12 @@ library ExitFormat {
      * @dev Inspects a single asset exit to detect if it is foreign to this assetHolder.
      * @param singleAssetExit The single asset exit under inspection.
      */
-    function _isForeignAsset(SingleAssetExit memory singleAssetExit)
-        internal
-        view
-        returns (bool)
-    {
+    function _isForeignAsset(SingleAssetExit memory singleAssetExit) internal view returns (bool) {
         if (singleAssetExit.assetMetadata.assetType == AssetType.Qualified) {
             QualifiedAssetMetaData memory expectedLocation =
-                abi.decode(
-                    singleAssetExit.assetMetadata.metadata,
-                    (QualifiedAssetMetaData)
-                );
+                abi.decode(singleAssetExit.assetMetadata.metadata, (QualifiedAssetMetaData));
 
-            return
-                expectedLocation.chainID != block.chainid ||
-                expectedLocation.assetHolder != address(this);
+            return expectedLocation.chainID != block.chainid || expectedLocation.assetHolder != address(this);
         } else {
             // All unqualified assets are local by assumption.
             return false;
@@ -275,11 +218,7 @@ library ExitFormat {
      * @notice Returns a callTo address and callData from metadata bytes
      * @dev Returns a callTo address and callData from metadata bytes
      */
-    function _parseWithdrawHelper(bytes memory metadata)
-        internal
-        pure
-        returns (WithdrawHelperMetaData memory)
-    {
+    function _parseWithdrawHelper(bytes memory metadata) internal pure returns (WithdrawHelperMetaData memory) {
         return abi.decode(metadata, (WithdrawHelperMetaData));
     }
 
@@ -290,11 +229,7 @@ library ExitFormat {
      * @param _postBytes The other bytes string
      * @return true if the bytes are identical, false otherwise.
      */
-    function _bytesEqual(bytes memory _preBytes, bytes memory _postBytes)
-        internal
-        pure
-        returns (bool)
-    {
+    function _bytesEqual(bytes memory _preBytes, bytes memory _postBytes) internal pure returns (bool) {
         // copied from https://www.npmjs.com/package/solidity-bytes-utils/v/0.1.1
         bool success = true;
 
@@ -304,36 +239,35 @@ library ExitFormat {
 
             // if lengths don't match the arrays are not equal
             switch eq(length, mload(_postBytes))
-                case 1 {
-                    // cb is a circuit breaker in the for loop since there's
-                    //  no said feature for inline assembly loops
-                    // cb = 1 - don't breaker
-                    // cb = 0 - break
-                    let cb := 1
+            case 1 {
+                // cb is a circuit breaker in the for loop since there's
+                //  no said feature for inline assembly loops
+                // cb = 1 - don't breaker
+                // cb = 0 - break
+                let cb := 1
 
-                    let mc := add(_preBytes, 0x20)
-                    let end := add(mc, length)
+                let mc := add(_preBytes, 0x20)
+                let end := add(mc, length)
 
-                    for {
-                        let cc := add(_postBytes, 0x20)
-                        // the next line is the loop condition:
-                        // while(uint256(mc < end) + cb == 2)
-                    } eq(add(lt(mc, end), cb), 2) {
-                        mc := add(mc, 0x20)
-                        cc := add(cc, 0x20)
-                    } {
-                        // if any of these checks fails then arrays are not equal
-                        if iszero(eq(mload(mc), mload(cc))) {
-                            // unsuccess:
-                            success := 0
-                            cb := 0
-                        }
+                for { let cc := add(_postBytes, 0x20) }
+                // the next line is the loop condition:
+                // while(uint256(mc < end) + cb == 2)
+                eq(add(lt(mc, end), cb), 2) {
+                    mc := add(mc, 0x20)
+                    cc := add(cc, 0x20)
+                } {
+                    // if any of these checks fails then arrays are not equal
+                    if iszero(eq(mload(mc), mload(cc))) {
+                        // unsuccess:
+                        success := 0
+                        cb := 0
                     }
                 }
-                default {
-                    // unsuccess:
-                    success := 0
-                }
+            }
+            default {
+                // unsuccess:
+                success := 0
+            }
         }
         /* solhint-disable no-inline-assembly */
 
