@@ -3,9 +3,10 @@ pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
 import "../src/ExitFormat.sol";
+import "./TestHolder.sol";
 
-contract TestConsumer is ERC1155Holder {
-    receive() external payable {
+contract TestConsumer {
+    receive() external virtual payable {
         // contract may receive ether
     }
 
@@ -39,5 +40,11 @@ contract TestConsumer is ERC1155Holder {
 
     function executeExit(ExitFormat.SingleAssetExit[] memory exit) public {
         ExitFormat.executeExit(exit);
+    }
+}
+
+contract TestHolderConsumer is TestHolder, TestConsumer {
+receive() external override(TestHolder, TestConsumer) payable {
+        // contract may receive ether
     }
 }

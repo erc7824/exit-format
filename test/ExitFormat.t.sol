@@ -5,13 +5,15 @@ import "forge-std/Test.sol";
 
 // Import the contracts under test. Adjust the paths if needed.
 import "../src/ExitFormat.sol";
-import "./TestConsumer.sol";
+import "./TestHolderConsumer.sol";
+import "./TestHolder.sol";
 import "./TestERC20.sol";
 import "./TestERC721.sol";
 import "./TestERC1155.sol";
 
 contract ExitFormatTest is Test {
-    TestConsumer public testConsumer;
+    TestHolderConsumer public testHolderConsumer;
+    TestHolder public testHolderReceiver;
     // Use an arbitrary address for “alice”
     address public alice = address(0x1234);
 
@@ -83,12 +85,13 @@ contract ExitFormatTest is Test {
     // ========== SETUP ==========
 
     function setUp() public {
-        testConsumer = new TestConsumer();
+        testHolderConsumer = new TestHolderConsumer();
+        testHolderReceiver = new TestHolder();
     }
 
     // ========== TESTS ==========
 
-    function testEncodeAllocation() public {
+    function testEncodeAllocation() public view {
         // Create an allocation:
         // destination: 0x00000000000000000000000096f7123E3A80C9813eF50213ADEd0e4511CB820f
         // amount: 1; allocationType: simple; metadata: empty.
@@ -99,7 +102,7 @@ contract ExitFormatTest is Test {
             metadata: ""
         });
         // Use TestConsumer’s wrapper to encode
-        bytes memory encoded = testConsumer.encodeAllocation(allocation);
+        bytes memory encoded = testHolderConsumer.encodeAllocation(allocation);
 
         // Expected encoding copied
         bytes memory expected = hex"0000000000000000000000000000000000000000000000000000000000000020"
@@ -112,7 +115,7 @@ contract ExitFormatTest is Test {
         assertEq(keccak256(encoded), keccak256(expected), "Allocation encoding mismatch");
     }
 
-    function testEncodeExit() public {
+    function testEncodeExit() public view {
         // Build a single-element exit using a “null” asset metadata (default type and empty metadata).
         ExitFormat.AssetMetadata memory nullAssetMetadata = ExitFormat.AssetMetadata({
             assetType: ExitFormat.AssetType.Default,
@@ -135,7 +138,7 @@ contract ExitFormatTest is Test {
         ExitFormat.SingleAssetExit[] memory exitArr = new ExitFormat.SingleAssetExit[](1);
         exitArr[0] = sae;
 
-        bytes memory encodedExit = testConsumer.encodeExit(exitArr);
+        bytes memory encodedExit = testHolderConsumer.encodeExit(exitArr);
 
         // Expected encoding
         bytes memory expected = hex"0000000000000000000000000000000000000000000000000000000000000020"
@@ -158,7 +161,7 @@ contract ExitFormatTest is Test {
         assertEq(keccak256(encodedExit), keccak256(expected), "Exit encoding mismatch");
     }
 
-    function testExitsEqual() public {
+    function testExitsEqual() public view {
         ExitFormat.AssetMetadata memory nullAssetMetadata = ExitFormat.AssetMetadata({
             assetType: ExitFormat.AssetType.Default,
             metadata: ""
@@ -188,8 +191,8 @@ contract ExitFormatTest is Test {
         });
         ExitFormat.SingleAssetExit[] memory exitC = _toExitArray(saeC);
 
-        bool eqAB = testConsumer.exitsEqual(exitA, exitB);
-        bool eqAC = testConsumer.exitsEqual(exitA, exitC);
+        bool eqAB = testHolderConsumer.exitsEqual(exitA, exitB);
+        bool eqAC = testHolderConsumer.exitsEqual(exitA, exitC);
         assertTrue(eqAB, "Exits A and B should be equal");
         assertFalse(eqAC, "Exits A and C should not be equal");
     }
@@ -198,7 +201,7 @@ contract ExitFormatTest is Test {
         // Test native asset (ETH) exit execution.
         uint256 amount = 1; // 1 wei
         // Fund testConsumer with 2 wei.
-        (bool sent, ) = address(testConsumer).call{value: 2} ("");
+        (bool sent, ) = address(testHolderConsumer).call{value: 2} ("");
         require(sent, "Funding testConsumer failed");
 
         // Create a native asset exit with default asset metadata.
@@ -209,12 +212,12 @@ contract ExitFormatTest is Test {
         ExitFormat.SingleAssetExit memory sae = makeSimpleExit(address(0), alice, amount, nullAssetMetadata);
 
         // Execute as a single asset exit.
-        testConsumer.executeSingleAssetExit(sae);
+        testHolderConsumer.executeSingleAssetExit(sae);
         // Check that alice’s balance increased by amount.
         assertEq(alice.balance, amount, "Alice did not receive native asset exit amount");
 
         // Now, execute using executeExit (array version).
-        testConsumer.executeExit(_toExitArray(sae));
+        testHolderConsumer.executeExit(_toExitArray(sae));
         assertEq(alice.balance, amount * 2, "Alice did not receive total native asset exit amount");
     }
 
@@ -223,9 +226,9 @@ contract ExitFormatTest is Test {
         uint256 initialSupply = 1000 ether;
         TestERC20 token = new TestERC20(initialSupply);
         // Transfer all tokens from this contract (deployer) to testConsumer.
-        token.transfer(address(testConsumer), initialSupply);
+        token.transfer(address(testHolderConsumer), initialSupply);
         assertEq(token.balanceOf(address(this)), 0, "Deployer should have 0 tokens");
-        assertEq(token.balanceOf(address(testConsumer)), initialSupply, "TestConsumer should hold tokens");
+        assertEq(token.balanceOf(address(testHolderConsumer)), initialSupply, "TestConsumer should hold tokens");
 
         // Create an ERC20 exit (using Default asset metadata).
         ExitFormat.AssetMetadata memory assetMetadata = ExitFormat.AssetMetadata({
@@ -235,18 +238,17 @@ contract ExitFormatTest is Test {
         ExitFormat.SingleAssetExit memory sae = makeSimpleExit(address(token), address(this), initialSupply, assetMetadata);
 
         // Execute the ERC20 exit.
-        testConsumer.executeSingleAssetExit(sae);
+        testHolderConsumer.executeSingleAssetExit(sae);
         assertEq(token.balanceOf(address(this)), initialSupply, "Deployer should receive tokens back");
-        assertEq(token.balanceOf(address(testConsumer)), 0, "TestConsumer should have 0 tokens after exit");
+        assertEq(token.balanceOf(address(testHolderConsumer)), 0, "TestConsumer should have 0 tokens after exit");
     }
 
     function testExecuteERC721AssetExit() public {
         // Deploy an ERC721 token (the TestERC721 contract mints token IDs 11 and 22).
+        vm.prank(address(testHolderConsumer));
         TestERC721 token = new TestERC721();
         uint256 tokenId = 11;
-        // Transfer tokenId 11 from this contract to testConsumer.
-        token.transferFrom(address(this), address(testConsumer), tokenId);
-        assertEq(token.ownerOf(tokenId), address(testConsumer), "TestConsumer should own the token");
+        assertEq(token.ownerOf(tokenId), address(testHolderConsumer), "TestConsumer should own the token");
 
         // Prepare the ERC721 exit:
         // For ERC721 exits the amount must be 1 and the metadata encodes the token ID.
@@ -255,17 +257,17 @@ contract ExitFormatTest is Test {
             assetType: ExitFormat.AssetType.ERC721,
             metadata: tokenMeta
         });
-        ExitFormat.SingleAssetExit memory sae = makeSimpleExit(address(token), address(this), 1, assetMetadata);
+        ExitFormat.SingleAssetExit memory sae = makeSimpleExit(address(token), address(testHolderReceiver), 1, assetMetadata);
 
-        testConsumer.executeSingleAssetExit(sae);
-        assertEq(token.ownerOf(tokenId), address(this), "ERC721 token not transferred correctly");
+        testHolderConsumer.executeSingleAssetExit(sae);
+        assertEq(token.ownerOf(tokenId), address(testHolderReceiver), "ERC721 token not transferred correctly");
     }
 
     function testERC721ExitAmountFails() public {
         TestERC721 token = new TestERC721();
         uint256 tokenId = 11;
         // Transfer token to testConsumer.
-        token.transferFrom(address(this), address(testConsumer), tokenId);
+        token.transferFrom(address(this), address(testHolderConsumer), tokenId);
         bytes memory tokenMeta = abi.encode(tokenId);
         ExitFormat.AssetMetadata memory assetMetadata = ExitFormat.AssetMetadata({
             assetType: ExitFormat.AssetType.ERC721,
@@ -274,7 +276,7 @@ contract ExitFormatTest is Test {
         // Create an exit with an invalid amount (>1) for ERC721.
         ExitFormat.SingleAssetExit memory sae = makeSimpleExit(address(token), address(this), 10, assetMetadata);
         vm.expectRevert(bytes("Amount must be 1 for an ERC721 exit"));
-        testConsumer.executeSingleAssetExit(sae);
+        testHolderConsumer.executeSingleAssetExit(sae);
     }
 
     function testERC721InvalidTokenIdFails() public {
@@ -288,17 +290,17 @@ contract ExitFormatTest is Test {
         ExitFormat.SingleAssetExit memory sae = makeSimpleExit(address(token), address(this), 1, assetMetadata);
         // Expect a revert (the underlying ERC721 call should fail).
         vm.expectRevert();
-        testConsumer.executeSingleAssetExit(sae);
+        testHolderConsumer.executeSingleAssetExit(sae);
     }
 
     function testExecuteERC1155AssetExit() public {
         uint256 initialSupply = 1000 ether;
+
+        // create ERC1155 with testHolderConsumer as the caller
+        vm.prank(address(testHolderConsumer));
         TestERC1155 token = new TestERC1155(initialSupply);
         uint256 tokenId = 11;
-        // Transfer tokens (of tokenId 11) from this contract to testConsumer.
-        token.safeTransferFrom(address(this), address(testConsumer), tokenId, initialSupply, "");
-        assertEq(token.balanceOf(address(this), tokenId), 0, "Owner should have 0 tokens");
-        assertEq(token.balanceOf(address(testConsumer), tokenId), initialSupply, "TestConsumer should hold tokens");
+        assertEq(token.balanceOf(address(testHolderConsumer), tokenId), initialSupply, "TestHolder should hold tokens");
 
         // Prepare the ERC1155 exit.
         bytes memory tokenMeta = abi.encode(tokenId);
@@ -306,23 +308,24 @@ contract ExitFormatTest is Test {
             assetType: ExitFormat.AssetType.ERC1155,
             metadata: tokenMeta
         });
-        ExitFormat.SingleAssetExit memory sae = makeSimpleExit(address(token), address(this), initialSupply, assetMetadata);
+        ExitFormat.SingleAssetExit memory sae = makeSimpleExit(address(token), address(testHolderReceiver), initialSupply, assetMetadata);
 
-        testConsumer.executeSingleAssetExit(sae);
-        assertEq(token.balanceOf(address(this), tokenId), initialSupply, "Owner should receive tokens");
-        assertEq(token.balanceOf(address(testConsumer), tokenId), 0, "TestConsumer should hold 0 tokens");
+        testHolderConsumer.executeSingleAssetExit(sae);
+        assertEq(token.balanceOf(address(testHolderReceiver), tokenId), initialSupply, "testHolderReceiver should receive tokens");
+        assertEq(token.balanceOf(address(testHolderConsumer), tokenId), 0, "TestHolder should hold 0 tokens");
     }
 
     function testMultipleERC1155Exits() public {
         uint256 initialSupply = 1000 ether;
+
+        // create ERC1155 with TestConsumer as the caller
+        vm.prank(address(testHolderConsumer));
         TestERC1155 token = new TestERC1155(initialSupply);
         uint256 tokenAId = 11;
         uint256 tokenBId = 22;
-        // Transfer tokens for both token IDs to testConsumer.
-        token.safeTransferFrom(address(this), address(testConsumer), tokenAId, initialSupply, "");
-        token.safeTransferFrom(address(this), address(testConsumer), tokenBId, initialSupply, "");
-        assertEq(token.balanceOf(address(testConsumer), tokenAId), initialSupply, "Token A balance mismatch");
-        assertEq(token.balanceOf(address(testConsumer), tokenBId), initialSupply, "Token B balance mismatch");
+
+        assertEq(token.balanceOf(address(testHolderConsumer), tokenAId), initialSupply, "Token A balance mismatch");
+        assertEq(token.balanceOf(address(testHolderConsumer), tokenBId), initialSupply, "Token B balance mismatch");
 
         // Create two exits—one for each token.
         bytes memory tokenAMeta = abi.encode(tokenAId);
@@ -330,46 +333,45 @@ contract ExitFormatTest is Test {
             assetType: ExitFormat.AssetType.ERC1155,
             metadata: tokenAMeta
         });
-        ExitFormat.SingleAssetExit memory saeA = makeSimpleExit(address(token), address(this), initialSupply, assetMetadataA);
+        ExitFormat.SingleAssetExit memory saeA = makeSimpleExit(address(token), address(testHolderReceiver), initialSupply, assetMetadataA);
 
         bytes memory tokenBMeta = abi.encode(tokenBId);
         ExitFormat.AssetMetadata memory assetMetadataB = ExitFormat.AssetMetadata({
             assetType: ExitFormat.AssetType.ERC1155,
             metadata: tokenBMeta
         });
-        ExitFormat.SingleAssetExit memory saeB = makeSimpleExit(address(token), address(this), initialSupply, assetMetadataB);
+        ExitFormat.SingleAssetExit memory saeB = makeSimpleExit(address(token), address(testHolderReceiver), initialSupply, assetMetadataB);
 
         ExitFormat.SingleAssetExit[] memory exits = new ExitFormat.SingleAssetExit[](2);
         exits[0] = saeA;
         exits[1] = saeB;
 
-        testConsumer.executeExit(exits);
-        assertEq(token.balanceOf(address(this), tokenAId), initialSupply, "Owner token A balance incorrect after exit");
-        assertEq(token.balanceOf(address(this), tokenBId), initialSupply, "Owner token B balance incorrect after exit");
-        assertEq(token.balanceOf(address(testConsumer), tokenAId), 0, "TestConsumer token A balance should be 0");
-        assertEq(token.balanceOf(address(testConsumer), tokenBId), 0, "TestConsumer token B balance should be 0");
+        testHolderConsumer.executeExit(exits);
+        assertEq(token.balanceOf(address(testHolderReceiver), tokenAId), initialSupply, "testHolderReceiver token A balance incorrect after exit");
+        assertEq(token.balanceOf(address(testHolderReceiver), tokenBId), initialSupply, "testHolderReceiver token B balance incorrect after exit");
+        assertEq(token.balanceOf(address(testHolderConsumer), tokenAId), 0, "testHolder token A balance should be 0");
+        assertEq(token.balanceOf(address(testHolderConsumer), tokenBId), 0, "testHolder token B balance should be 0");
     }
 
     function testQualifiedAssets() public {
         uint256 amount = 1;
-        // Fund testConsumer with a native asset (ETH).
-        (bool sent, ) = address(testConsumer).call{value: amount}("");
-        require(sent, "Funding testConsumer failed");
+        vm.deal(address(testHolderConsumer), amount);
+        vm.deal(address(this), 0);
 
         // Bad case: wrong chain ID (use 1 instead of block.chainid)
-        ExitFormat.SingleAssetExit memory saeBadChain = getQualifiedSAE(1, address(testConsumer), address(this), amount);
-        testConsumer.executeSingleAssetExit(saeBadChain);
+        ExitFormat.SingleAssetExit memory saeBadChain = getQualifiedSAE(1, address(testHolderConsumer), address(this), amount);
+        testHolderConsumer.executeSingleAssetExit(saeBadChain);
         // Since the exit is “foreign”, no transfer should occur.
         assertEq(address(this).balance, 0, "Qualified exit with bad chain ID should not transfer funds");
 
         // Bad case: wrong asset holder (using this contract instead of testConsumer)
         ExitFormat.SingleAssetExit memory saeBadHolder = getQualifiedSAE(block.chainid, address(this), address(this), amount);
-        testConsumer.executeSingleAssetExit(saeBadHolder);
+        testHolderConsumer.executeSingleAssetExit(saeBadHolder);
         assertEq(address(this).balance, 0, "Qualified exit with bad asset holder should not transfer funds");
 
         // Success case: correctly qualified exit.
-        ExitFormat.SingleAssetExit memory saeGood = getQualifiedSAE(block.chainid, address(testConsumer), address(this), amount);
-        testConsumer.executeSingleAssetExit(saeGood);
+        ExitFormat.SingleAssetExit memory saeGood = getQualifiedSAE(block.chainid, address(testHolderConsumer), address(this), amount);
+        testHolderConsumer.executeSingleAssetExit(saeGood);
         assertEq(address(this).balance, amount, "Qualified exit with correct parameters failed");
     }
 
